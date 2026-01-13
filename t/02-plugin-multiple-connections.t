@@ -10,8 +10,7 @@ use Plack::Test;
 use HTTP::Request::Common;
 use DBI;
 
-# Create two temporary databases
-my $dir = tempdir(CLEANUP => 1);
+my $dir      = tempdir(CLEANUP => 1);
 my $db_file1 = catfile($dir, 'test1.db');
 my $db_file2 = catfile($dir, 'test2.db');
 
@@ -52,7 +51,6 @@ my $db_file2 = catfile($dir, 'test2.db');
     $dbh->disconnect;
 }
 
-# Create test Dancer2 app with multiple connections
 {
     package TestApp;
     use Dancer2;

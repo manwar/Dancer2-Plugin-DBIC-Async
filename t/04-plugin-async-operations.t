@@ -1,20 +1,19 @@
-# t/04-plugin-async-operations.t
 #!/usr/bin/env perl
+
 use strict;
 use warnings;
 use JSON;
 use Test::More;
 use File::Temp qw(tempdir);
 use File::Spec::Functions qw(catfile);
+
 use Plack::Test;
-use HTTP::Request::Common qw(GET POST PUT DELETE);  # Add DELETE here
+use HTTP::Request::Common qw(GET POST PUT DELETE);
 use DBI;
 
-# Create temporary database
-my $dir = tempdir(CLEANUP => 1);
+my $dir     = tempdir(CLEANUP => 1);
 my $db_file = catfile($dir, 'test.db');
 
-# Set up test database
 my $dbh = DBI->connect("dbi:SQLite:dbname=$db_file", "", "", {
     RaiseError => 1,
     AutoCommit => 1,
