@@ -22,7 +22,7 @@ Version 0.02
 =head1 BENEFITS
 
 The primary benefit of L<Dancer2::Plugin::DBIC::Async> over the standard L<Dancer2::Plugin::DBIC>
-is the ability to handle high-concurrency database operations without blocking the web server’s
+is the ability to handle high-concurrency database operations without blocking the web server's
 worker processes.
 
 In a standard sync environment, every database query is a B<"stop-the-world"> event for that
