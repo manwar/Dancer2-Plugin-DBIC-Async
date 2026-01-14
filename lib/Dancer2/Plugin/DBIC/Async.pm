@@ -1,6 +1,6 @@
 package Dancer2::Plugin::DBIC::Async;
 
-$Dancer2::Plugin::DBIC::Async::VERSION   = '0.02';
+$Dancer2::Plugin::DBIC::Async::VERSION   = '0.03';
 $Dancer2::Plugin::DBIC::Async::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -11,13 +11,15 @@ use Dancer2::Plugin;
 use DBIx::Class::Async;
 use Module::Runtime qw(use_module);
 
+=encoding utf8
+
 =head1 NAME
 
 Dancer2::Plugin::DBIC::Async - Asynchronous DBIx::Class::Async plugin for Dancer2
 
 =head1 VERSION
 
-Version 0.02
+Version 0.03
 
 =head1 BENEFITS
 
@@ -38,14 +40,14 @@ cannot accept any other incoming requests for that B<half a second>.
 
 =item Sync
 
-    10 workers can handle exactly 10 simultaneous long-running queries.
-    The 11th user must wait in the TCP queue.
+10 workers can handle exactly 10 simultaneous long-running queries. The 11th user
+must wait in the TCP queue.
 
 =item Async
 
-    A single worker can initiate dozens of database queries.
-    While the database is processing the data, the worker remains free to handle other
-    incoming requests or perform other I/O tasks.
+A single worker can initiate dozens of database queries. While the database is
+processing the data, the worker remains free to handle other incoming requests
+or perform other I/O tasks.
 
 =back
 
@@ -92,11 +94,11 @@ However, each worker consumes significant B<RAM>.
 
 =item Sync Scaling
 
-    High Memory usage (100 workers = 100x memory).
+High Memory usage (100 workers = 100x memory).
 
 =item Async Scaling
 
-    Low Memory usage (1 worker handles 100 connections).
+Low Memory usage (1 worker handles 100 connections).
 
 =back
 
@@ -186,19 +188,19 @@ the worker stays free between the steps.
 
 =item Context Switching
 
-    In the sync version, the operating system might pause the process (context switch)
-    while waiting for the disk. In the async version, the Event Loop (L<IO::Async>) manages
-    this, which is much lighter on the CPU.
+In the sync version, the operating system might pause the process (context switch)
+while waiting for the disk. In the async version, the Event Loop (L<IO::Async>) manages
+this, which is much lighter on the CPU.
 
 =item Wait vs. Block
 
-    In the async version, we use B<wait_all> or B<then>. This tells the server: B<"Keep this
-    request in mind, but go help other users until the data comes back.">
+In the async version, we use B<wait_all> or B<then>. This tells the server: B<"Keep this
+request in mind, but go help other users until the data comes back.">
 
 =item Error Handling
 
-    L<Futures> have built-in B<->on_fail> handlers, making it easier to manage database timeouts
-    without crashing the whole worker.
+L<Futures> have built-in B<->on_fail> handlers, making it easier to manage database timeouts
+without crashing the whole worker.
 
 =back
 
