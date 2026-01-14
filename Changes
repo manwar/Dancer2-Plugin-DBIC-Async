@@ -1,4 +1,7 @@
 Revision history for Dancer2::Plugin::DBIC::Async
 
+0.0i2  2026-01-14
+      - Updated pod w.r.t the benefits of async operations.
+
 0.01  2026-01-13
       - Module Created.
