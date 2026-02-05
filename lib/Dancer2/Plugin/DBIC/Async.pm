@@ -1,6 +1,6 @@
 package Dancer2::Plugin::DBIC::Async;
 
-$Dancer2::Plugin::DBIC::Async::VERSION   = '0.04';
+$Dancer2::Plugin::DBIC::Async::VERSION   = '0.05';
 $Dancer2::Plugin::DBIC::Async::AUTHORITY = 'cpan:MANWAR';
 
 use strict;
@@ -20,7 +20,7 @@ Dancer2::Plugin::DBIC::Async - High-concurrency DBIx::Class bridge for Dancer2
 
 =head1 VERSION
 
-Version 0.04
+Version 0.05
 
 =head1 BENEFITS
 
@@ -119,11 +119,42 @@ Low Memory usage (1 worker handles 100 connections).
             workers: 4
 
     # In your Dancer2 app
+    use Dancer2;
     use Dancer2::Plugin::DBIC::Async;
+    use Future;
 
-    get '/users' => sub {
+    # Basic non-blocking count
+    get '/count' => sub {
         my $count = async_count('User')->get;
-        return to_json({ count => $count });
+        return to_json({ total_users => $count });
+    };
+
+    # Advanced: Parallel queries (non-blocking)
+    get '/dashboard' => sub {
+        my $query = query_parameters->get('q');
+
+        # 1. Fire multiple queries simultaneously
+        my $search_f = async_search('User', { name => { -like => "%$query%" } });
+        my $count_f  = async_count('User');
+
+        # 2. Wait for all background workers to finish
+        Future->wait_all($search_f, $count_f)->get;
+
+        # 3. Retrieve results (already deflated to HashRefs)
+        my @users = @{ $search_f->get };
+        my $total = $count_f->get;
+
+        template 'dashboard' => {
+            users => \@users,
+            total => $total,
+        };
+    };
+
+    # Flexible Update (Scalar ID or HashRef query)
+    post '/user/:id/deactivate' => sub {
+        my $id = route_parameters->get('id');
+        async_update('User', $id, { active => 0 })->get;
+        return "User deactivated";
     };
 
 =head1 KEYWORDS
@@ -133,22 +164,23 @@ Low Memory usage (1 worker handles 100 connections).
     my $schema = async_db();
     my $schema = async_db('custom_connection');
 
-Returns the underlying L<DBIx::Class::Async::Schema> instance. Use this for
-complex operations like C<txn_do> or C<storage> management.
+Returns the underlying L<DBIx::Class::Async::Schema> instance for the
+specified connection. Use this for complex operations like C<txn_do> or
+direct storage management. The connection name defaults to C<'default'>.
 
 =head2 async_rs
 
     my $rs = async_rs('User');
     my $f  = $rs->search({ active => 1 })->page(2)->all;
 
-Returns a L<DBIx::Class::ResultSet> proxy. Methods called on this proxy return
-L<Future> objects instead of data. This is the most flexible way to build
-complex, non-blocking queries.
+Returns a L<DBIx::Class::ResultSet> proxy for the specified source. Methods
+called on this proxy return L<Future> objects instead of data. This is the
+most flexible way to build complex, non-blocking queries.
 
 =head2 async_count
 
     my $f = async_count('User');
-    my $count = $f->get;
+    my $f = async_count('User', 'custom_connection');
 
 Returns a L<Future> that resolves to the integer count of records in the
 specified source.
@@ -156,40 +188,53 @@ specified source.
 =head2 async_find
 
     my $f = async_find('User', $id);
-    my $user_hash = $f->get;
+    my $f = async_find('User', $id, 'custom_connection');
 
 Returns a L<Future> that resolves to a single record (as a deflated HashRef)
-matching the provided primary key.
+matching the provided primary key. Returns C<undef> if no record is found.
 
 =head2 async_search
 
-    my $f = async_search('User', { status => 'active' });
-    my $users_arrayref = $f->get;
+    my $f = async_search('Contact', { active => 1 });
+    my $f = async_search('Contact', { id => 5 }, 'archive');
 
-Returns a L<Future> that resolves to an B<ArrayRef> of matching records
-(deflated HashRefs).
+Returns a L<Future> that resolves to an ArrayRef of HashRefs representing
+the rows. This is the recommended way to fetch multiple records for
+non-blocking templates or JSON responses.
 
 =head2 async_create
 
     my $f = async_create('User', { name => 'Alice', email => 'alice@example.com' });
-    my $new_user = $f->get;
 
-Returns a L<Future> that resolves to the newly created record (deflated HashRef).
-The operation is performed by a background worker.
+Returns a L<Future> that resolves to the newly created record as a deflated HashRef.
 
 =head2 async_update
 
     my $f = async_update('User', $id, { status => 'inactive' });
+    my $f = async_update('User', { status => 'pending' }, { status => 'active' });
 
-Returns a L<Future> that resolves once the update is complete. Note that
-this targets the record by the primary key C<id>.
+Returns a L<Future> that resolves to the number of rows updated (as an integer).
+
+B<Note:> The second argument can be either a scalar primary key (assumed to
+be the column C<'id'>) or a standard L<DBIx::Class> search HashRef for
+complex updates.
 
 =head2 async_delete
 
     my $f = async_delete('User', $id);
+    my $f = async_delete('User', { status => 'spam' });
 
-Returns a L<Future> that resolves once the record with the specified primary
-key has been deleted.
+Returns a L<Future> that resolves to the number of rows deleted (as an integer).
+
+B<Note:> Like C<async_update>, the second argument can be a scalar primary
+key (targeting the column C<'id'>) or a search HashRef.
+
+=head1 DATA FORMAT
+
+All keywords that return row data (C<async_find>, C<async_search>, C<async_create>)
+return B<deflated HashRefs> rather than L<DBIx::Class::Row> objects. This
+ensures that the data is safe to use outside of the background worker's event
+loop and is ready for serialization to JSON or rendering in templates.
 
 =cut
 
@@ -228,74 +273,112 @@ sub async_count :PluginKeyword {
 
 sub async_find :PluginKeyword {
     my ($plugin, $source, $id, $name) = @_;
+
+    # If the user passed a HashRef into the $name slot, they likely forgot
+    # the connection name is optional.
+    $name = undef if ref $name;
+
     return _get_async($plugin, $name)->resultset($source)->find($id)->transform(
         done => sub {
             my $row = shift;
             return undef unless $row;
-
-            my %data = $row->get_columns;
-            return \%data;
+            return { $row->get_columns };
         }
     );
 }
 
 sub async_search :PluginKeyword {
     my ($plugin, $source, $cond, $name) = @_;
-    return _get_async($plugin, $name)->resultset($source)->search($cond)->all->transform(
-        done => sub {
-            my $rows = shift;
-            return [ map {
-                my %data = $_->get_columns;
-                \%data
-            } @$rows ];
-        }
-    );
+
+    # Defensive check: If $cond was skipped and $name was passed in 3rd slot
+    # or if $name is a HashRef (meaning it's actually the condition).
+    if (ref $name eq 'HASH') {
+        # This shouldn't happen with the current signature, but protects
+        # against users confusing argument order.
+        my $tmp = $cond;
+        $cond = $name;
+        $name = $tmp;
+    }
+
+    # Pass $name to _get_async; our improved _get_async
+    # will handle it if it's undef or invalid.
+    return _get_async($plugin, $name)
+        ->resultset($source)
+        ->search($cond)
+        ->all
+        ->transform(
+            done => sub {
+                my $rows = shift;
+                return [ map {
+                    my %data = $_->get_columns;
+                    \%data
+                } @$rows ];
+            }
+        );
 }
 
 sub async_create :PluginKeyword {
     my ($plugin, $source, $data, $name) = @_;
+
+    $name = undef if ref $name;
+
     return _get_async($plugin, $name)->resultset($source)->create($data)->transform(
         done => sub {
             my $row = shift;
-            my %data = $row->get_columns;
-            return \%data;
+            return { $row->get_columns };
         }
     );
 }
 
 sub async_update :PluginKeyword {
-    my ($plugin, $source, $id, $data, $name) = @_;
+    my ($plugin, $source, $query, $data, $name) = @_;
+
+    # Defensive check: if $query is just a scalar ID, turn it into a hashref
+    $query = { id => $query } unless ref $query;
+    $name  = undef if ref $name;
 
     return _get_async($plugin, $name)
         ->resultset($source)
-        ->search({ id => $id })
+        ->search($query)
         ->update($data)
         ->transform(
             done => sub {
                 my $result = shift;
-                return ref($result) ? $result : $result + 0;
+                # DBIC update returns the number of rows affected.
+                # We ensure it's returned as a pure integer.
+                return int($result // 0);
             }
         );
 }
 
 sub async_delete :PluginKeyword {
-    my ($plugin, $source, $id, $name) = @_;
+    my ($plugin, $source, $query, $name) = @_;
+
+    # Defensive check: handle scalar ID for backward compatibility in tests
+    $query = { id => $query } unless ref $query;
+    $name  = undef if ref $name;
 
     return _get_async($plugin, $name)
         ->resultset($source)
-        ->search({ id => $id })
+        ->search($query)
         ->delete
         ->transform(
             done => sub {
                 my $result = shift;
-                return $result + 0;
+                # Return strictly as an integer
+                return int($result // 0);
             }
         );
 }
 
 sub _get_async {
     my ($plugin, $name) = @_;
-    $name ||= 'default';
+
+    # If $name is a reference (like a condition hash) or missing,
+    # it's clearly not the connection name.
+    if (!defined $name || ref $name) {
+        $name = 'default';
+    }
 
     return $INSTANCES{$name} if $INSTANCES{$name};
 
