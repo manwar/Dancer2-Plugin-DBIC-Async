@@ -1,5 +1,14 @@
 Revision history for Dancer2::Plugin::DBIC::Async
 
+0.04 2026-02-05
+     - Upgrade to DBIx::Class::Async 0.54 for stable resultset proxy support.
+     - Internal refactor: Use DBIx::Class::Async::Schema as the primary bridge.
+     - Improvement: Keywords now return plain Data (HashRefs/Scalars) instead
+       of blessed Row objects to ensure compatibility with Dancer2's
+       automatic JSON serialization.
+     - Fix: Ensure IO::Async::Loop is maintained as a singleton state variable.
+     - Updated test suite to use dynamic counting and JSON content negotiation.
+
 0.03  2026-01-14
       - Tidied up pod further.
       - Added standard unit test: t/pod.t and t/manifest.t
